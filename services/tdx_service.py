@@ -63,5 +63,13 @@ class TDXApi:
         """查詢指定車站的首末班車時間"""
         url = f"{self.base_url}/v2/Rail/Metro/FirstLastTimetable/TRTC?$filter=StationID eq '{station_id}'&$format=JSON"
         return self._get_api_data(url)
-
+    def get_station_facilities(self):
+        """獲取所有台北捷運車站的設施資訊。"""
+        api_url = f"{self.base_url}/v2/Metro/StationFacility/TRTC"
+        return self._make_request(api_url)
+    # 在 TDXApi class 中新增
+    def get_station_exit_info(self):
+        """一次性獲取所有車站的出口資訊。"""
+        api_url = f"{self.base_url}/v2/Metro/StationExit/TRTC"
+        return self._make_request(api_url)
 tdx_api = TDXApi(client_id=config.TDX_CLIENT_ID, client_secret=config.TDX_CLIENT_SECRET)

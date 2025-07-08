@@ -17,3 +17,5 @@ uvicorn[standard] # [standard] 會一併安裝建議的依賴，以獲得更好�
 pydantic>=2.0.0  # <--- 新增這一行
 jinja2
 networkx 
+beautifulsoup4 
+lxml

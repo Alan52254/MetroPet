@@ -9,7 +9,6 @@
     <link rel="stylesheet" as="style" onload="this.rel='stylesheet'" href="https://fonts.googleapis.com/css2?display=swap&family=Noto+Sans:wght@400;500;700;900&family=Plus+Jakarta+Sans:wght@400;500;700;800">
     <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
     <style>
-        /* 讓聊天容器可以滾動 */
         #chat-container {
             flex: 1 1 0%;
             overflow-y: auto;
@@ -42,7 +41,7 @@
                         <p class="text-base font-normal flex max-w-[360px] rounded-xl px-4 py-3 bg-[#f0f2f4] text-[#111318]">你好！我是你的捷運好夥伴「捷米」，準備好一起探索台北了嗎？</p>
                     </div>
                 </div>
-                </div>
+            </div>
         </div>
 
         <div class="bg-white border-t border-gray-200">
@@ -74,6 +73,9 @@
             const messageInput = document.getElementById('message-input');
             const sendButton = document.getElementById('send-button');
 
+            // 【新增】用一個變數來儲存對話歷史
+            let chatHistory = [];
+
             sendButton.addEventListener('click', sendMessage);
             messageInput.addEventListener('keydown', (event) => {
                 if (event.key === 'Enter') {
@@ -96,7 +98,11 @@
                     const response = await fetch('/chat', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ message: messageText }),
+                        // 【修改】將目前的歷史紀錄一起送出
+                        body: JSON.stringify({ 
+                            message: messageText,
+                            chat_history: chatHistory
+                        }),
                     });
 
                     if (!response.ok) {
@@ -105,6 +111,9 @@
 
                     const data = await response.json();
                     
+                    // 【修改】從後端接收更新後的歷史紀錄
+                    chatHistory = data.chat_history;
+
                     chatContainer.removeChild(typingIndicator);
                     appendAgentMessage(data.response);
                 } catch (error) {
@@ -113,7 +122,8 @@
                     console.error('Error fetching chat response:', error);
                 }
             }
-
+            
+            // 以下的輔助函式維持不變
             function appendUserMessage(text) {
                 const userAvatar = `https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=2960&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D`;
                 const messageHtml = `
@@ -129,7 +139,6 @@
 
             function appendAgentMessage(text) {
                 const agentAvatar = `https://images.unsplash.com/photo-1639747525393-216a2d06633e?q=80&w=2787&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D`;
-                // 將換行符號 \n 轉換為 <br>
                 const formattedText = text.replace(/\n/g, '<br>');
                 const messageHtml = `
                   <div class="flex items-end gap-3 p-4">
