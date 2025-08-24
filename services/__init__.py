@@ -1,4 +1,4 @@
-# services/service_registry.py
+#services/service_registry.py
 
 import logging
 import config
@@ -15,6 +15,7 @@ from .metro_soap_service import MetroSoapService
 from .prediction_service import CongestionPredictor 
 from .first_last_train_time_service import FirstLastTrainTimeService 
 from .realtime_mrt_service import RealtimeMRTService 
+from .analysis_service import PredictionAnalysisService # <<< 1. 新增匯入我們的繪圖分析服務
 
 # 設定日誌記錄器
 logger = logging.getLogger(__name__)
@@ -38,6 +39,7 @@ class ServiceRegistry:
     congestion_predictor: CongestionPredictor
     first_last_train_time_service: FirstLastTrainTimeService 
     realtime_mrt_service: RealtimeMRTService 
+    prediction_analysis_service: PredictionAnalysisService # <<< 2. 新增類型提示
 
     def __new__(cls):
         if cls._instance is None:
@@ -86,6 +88,13 @@ class ServiceRegistry:
 
             self.congestion_predictor = CongestionPredictor(
                 station_manager_instance=self.station_manager
+            )
+            
+            # <<< 3. 在此處新增分析服務的初始化 >>>
+            # 它在 congestion_predictor 之後初始化是個好習慣，因為它依賴於前者
+            self.prediction_analysis_service = PredictionAnalysisService(
+                station_manager=self.station_manager,
+                congestion_predictor=self.congestion_predictor
             )
 
             # 【重點修正】初始化 FirstLastTrainTimeService
@@ -136,5 +145,9 @@ class ServiceRegistry:
 
     def get_realtime_mrt_service(self) -> RealtimeMRTService:
         return self.realtime_mrt_service
+
+    # <<< 4. 新增 Getter 方法，讓 tools 可以取用新服務 >>>
+    def get_prediction_analysis_service(self) -> PredictionAnalysisService:
+        return self.prediction_analysis_service
 
 service_registry = ServiceRegistry()

@@ -16,6 +16,8 @@ scikit-learn>=1.0.0
 xgboost>=2.0.0
 beautifulsoup4>=4.13.0
 lxml>=5.0.0
+dateparser>=1.2.0             # 新增：用於解析自然語言時間字串
+imbalanced-learn>=0.12.0    # 新增：用於處理類別不平衡問題（如SMOTE，已在model_trainer中導入）
 
 # --- FastAPI Server ---
 fastapi>=0.110.0

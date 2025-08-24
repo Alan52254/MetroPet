@@ -490,10 +490,10 @@ def get_realtime_mrt_info(station_name: str, destination: str) -> str:
 # --- 【 ✨✨✨ 修正並強化這個工具 ✨✨✨ 】 ---
 # 假設這是您之前加入的 Emoji 對應
 CONGESTION_EMOJI_MAP = {
-    1: "😊 舒適",
-    2: "🤔 正常",
-    3: "😥 略多",
-    4: "😡 擁擠"
+    1: "😊 空間舒適",
+    2: "🤔 人潮普通",
+    3: "😥 人潮略多",
+    4: "😡 車廂擁擠"
 }
 
 @tool
@@ -504,105 +504,97 @@ def predict_train_congestion(station_name: str, direction: str, datetime_str: Op
 
     Args:
         station_name (str): 預測的車站名稱。
-        direction (str): 預測的行駛方向或終點站名稱。
+        direction (str): 預測的行駛方向，可以是路線上的任何一個車站名稱。
         datetime_str (str, optional): 預測的日期和時間，可以是標準格式 `YYYY-MM-DD HH:MM`，
         也可以是自然語言表達，例如「明天早上八點」或「下一班車」。若未提供此參數，
         工具將自動使用當前時間進行預測。
     """
     logger.info(f"--- [工具(預測)] 原始查詢: {station_name} 往 {direction} 方向, 時間: {datetime_str} ---")
 
+    # --- 基本參數檢查 ---
     if not station_name or not direction:
         return json.dumps({
             "error": "Missing parameters",
-            "message": "🤔 哎呀，我需要知道您想查詢的「車站」和「方向」才能為您預測喔！" # 人性化錯誤訊息
+            "message": "🤔 哎呀，我需要知道您想查詢的「車站」和「方向」才能為您預測喔！"
         }, ensure_ascii=False)
 
+    # --- 時間解析 (與您原本的邏輯相同) ---
     target_datetime = None
     if datetime_str:
-        # 增加對口語化時間的處理
         if datetime_str.lower() in ["現在", "即將", "馬上", "下一班車"]:
             target_datetime = datetime.now()
         else:
-            # 使用 dateparser 來解析自然語言時間字串
             target_datetime = dateparser.parse(
                 datetime_str,
                 settings={'PREFER_DATES_FROM': 'future', 'TIMEZONE': 'Asia/Taipei'}
             )
     
     if not target_datetime:
-        # 如果使用者沒有提供時間，或 dateparser 無法解析，則使用當前時間
         target_datetime = datetime.now()
         logger.info("--- 未提供時間或無法解析，自動設定為當前時間 ---")
-
-    # --- 關鍵防禦：檢查解析出來的日期是否過於久遠，這通常代表 LLM 的幻覺或解析錯誤 ---
+    
     now = datetime.now()
     if target_datetime > now + timedelta(days=365) or target_datetime < now - timedelta(days=1):
-        logger.warning(f"--- ⚠️ 檢測到不合理的日期: {target_datetime.isoformat()}，可能為 LLM 幻覺。---")
+        logger.warning(f"--- ⚠️ 檢測到不合理的日期: {target_datetime.isoformat()} ---")
         return json.dumps({
             "error": "Invalid time period",
-            "message": f"📅 抱歉，您提供的日期 `{datetime_str}` 看起來有點太遙遠了。我只能預測一年內的擁擠度喔！今天的日期是 `{now.strftime('%Y-%m-%d')}`。" # 人性化錯誤訊息
+            "message": f"📅 抱歉，您提供的日期 `{datetime_str}` 看起來有點太遙遠了。我只能預測一年內的擁擠度喔！"
         }, ensure_ascii=False)
-        
-    # --- 別名解析 ---
-    # 確保 station_manager 已透過 service_registry 取得
-    station_manager = service_registry.station_manager 
+
+    # --- 【核心修改】整合 StationManager 的智慧方向解析 ---
+    
+    station_manager = service_registry.station_manager
     congestion_predictor = service_registry.congestion_predictor
 
-    # 1. 解析並標準化使用者輸入的車站和方向名稱
-    resolved_station_name_key = station_manager.resolve_station_alias(station_name)
-    resolved_direction_key = station_manager.resolve_station_alias(direction)
+    # 1. 取得用於顯示的官方站名 (使用者輸入 -> 官方名稱)
+    official_station_display_name = station_manager.get_official_unnormalized_name(station_name)
+    original_direction_display_name = station_manager.get_official_unnormalized_name(direction)
 
-    # 取得用於顯示給使用者的官方完整名稱
-    official_station_display_name = station_manager.get_official_unnormalized_name(resolved_station_name_key)
-    official_direction_display_name = station_manager.get_official_unnormalized_name(resolved_direction_key)
+    # 2. 【關鍵步驟】呼叫 station_manager 解析出真正的「終點站」方向
+    #    這一步會將 "往中山" 這樣的查詢，轉換為 ["淡水"]
+    final_terminal_keys = station_manager.resolve_direction(station_name, direction)
 
-    # 2. 獲取該出發站所有可能的終點站 (已標準化為內部鍵)
-    possible_terminals_keys = station_manager.get_terminal_stations_for(resolved_station_name_key)
-    
-    # 檢查出發站是否存在或有路線
-    if not possible_terminals_keys:
-        return json.dumps({
-            "error": "Station not found or no routes",
-            "message": f"😕 抱歉，我好像找不到「{station_name}」這個車站的資料，或是它沒有可查詢的路線耶。請問您有輸入正確的車站名稱嗎？" # 人性化錯誤訊息
-        }, ensure_ascii=False)
-
-    # 3. 驗證使用者查詢的方向是否為合法終點站
-    if resolved_direction_key not in possible_terminals_keys:
-        # 將可能的終點站內部鍵轉換為顯示名稱，以便提供友善提示
-        display_terminals = [station_manager.get_official_unnormalized_name(key) for key in possible_terminals_keys]
+    # 3. 驗證解析結果
+    if not final_terminal_keys:
+        # 如果解析結果為空，表示真的沒有直達路線
+        possible_terminals_display = [
+            station_manager.get_official_unnormalized_name(key) 
+            for key in station_manager.get_terminal_stations_for(station_name)
+        ]
+        error_message = f"🧭 哎呀！從「{official_station_display_name}」站，我找不到可以直達「{original_direction_display_name}」的路線耶。"
+        if possible_terminals_display:
+            error_message += f"\n\n您可以試試看查詢往以下終點站的方向：\n✨ **{'、'.join(possible_terminals_display)}**"
         
-        # 判斷是否因為方向名稱本身有問題，還是該站點根本沒有此方向
-        error_message = f"🧭 哎呀！從「{official_station_display_name}」站，好像沒有直接開往「{direction}」的車耶。" # 人性化錯誤訊息
-        if display_terminals:
-            error_message += f"\n\n您可以試試看往以下幾個方向查詢：\n✨ **{'、'.join(display_terminals)}**"
-        else:
-            error_message += f"\n\n這個車站似乎沒有明確的行駛方向資訊。"
-
         return json.dumps({
-            "error": "Invalid direction",
+            "error": "No direct route found",
             "message": error_message
         }, ensure_ascii=False)
 
-    # 執行擁擠度預測
+    # 4. 使用解析出的第一個終點站作為預測模型的輸入
+    target_terminal_key = final_terminal_keys[0]
+    official_terminal_for_prediction = station_manager.get_official_unnormalized_name(target_terminal_key)
+    
+    logger.info(f"--- 方向解析成功: '{direction}' -> '{official_terminal_for_prediction}' ---")
+
+    # 5. 執行擁擠度預測 (使用解析後的終點站)
     prediction_result = congestion_predictor.predict_for_station(
-        station_name=official_station_display_name, # 使用官方顯示名稱進行預測
-        direction=official_direction_display_name,   # 使用官方顯示名稱進行預測
+        station_name=official_station_display_name,
+        direction=official_terminal_for_prediction, # 傳入解析後的「終點站」
         target_datetime=target_datetime
     )
 
+    # --- 格式化輸出 (與您原本的邏輯大致相同，但優化了顯示訊息) ---
     if "error" in prediction_result:
-        return json.dumps({"message": f"😥 抱歉，預測時發生了一點小問題：{prediction_result['error']}"}, ensure_ascii=False) # 人性化錯誤訊息
+        return json.dumps({"message": f"😥 抱歉，預測時發生了一點小問題：{prediction_result['error']}"}, ensure_ascii=False)
 
     congestion_data = prediction_result.get("congestion_by_car", [])
     
     if congestion_data:
         time_display = target_datetime.strftime('%Y年%m月%d日 %H點%M分')
-        if datetime_str and datetime_str.lower() in ["現在", "即將", "馬上", "下一班車"]:
-            time_display = "現在"
-                
-        # 保持原本的輸出格式：開場白 + 列車擁擠度列表
+        
+        # 【UX 優化】在回覆中，顯示使用者原始查詢的方向，而不是解析後的終點站
         message_parts = [
-            f"根據預測，在 {time_display} 往「{official_direction_display_name}」方向的列車擁擠度如下：",
+            f"根據預測，在 {time_display} 往「{original_direction_display_name}」方向的列車擁擠度如下：",
             "---"
         ]
         
@@ -612,21 +604,20 @@ def predict_train_congestion(station_name: str, direction: str, datetime_str: Op
             emoji_text = CONGESTION_EMOJI_MAP.get(congestion_level, "❔")
             message_parts.append(f"第 {car_number} 節車廂：{emoji_text}")
         
-        # 從這裡開始加入人性化的總結語句
         max_congestion = max(c['congestion_level'] for c in congestion_data) if congestion_data else 0
-        if max_congestion >= 3: # 假設 3 代表中等擁擠，4 代表非常擁擠
+        if max_congestion >= 3:
             message_parts.append("\n💡 **貼心提醒**：部分車廂可能人潮較多，建議您往較空曠的車廂移動喔！")
-        elif max_congestion == 2: # 假設 2 代表普通
+        elif max_congestion == 2:
             message_parts.append("\n😊 車廂狀況還不錯，人潮普通，可以輕鬆搭乘！")
-        else: # 假設 0, 1 代表空曠
+        else:
             message_parts.append("\n🎉 太棒了！看起來車廂非常空曠，祝您有趟愉快的旅程！")
             
         final_message = "\n".join(message_parts)
     else:
-        final_message = f"😥 抱歉，目前暫時無法取得「{official_station_display_name}」往「{official_direction_display_name}」方向在此時段的擁擠度預測資料。您可以試試看其他時間或目的地喔！" # 人性化無資料訊息
+        final_message = f"😥 抱歉，目前暫時無法取得「{official_station_display_name}」往「{original_direction_display_name}」方向在此時段的擁擠度預測資料。"
 
-    response = {"message": final_message}
-    return json.dumps(response, ensure_ascii=False)
+    return json.dumps({"message": final_message}, ensure_ascii=False)
+
 
 # --- 唯一的 all_tools 列表，維持原樣，供 AgentExecutor 使用 ---
 all_tools = [
